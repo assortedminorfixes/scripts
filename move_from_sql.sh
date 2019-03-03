@@ -14,6 +14,8 @@ NELOGFILE="./$(basename $0).$$.NE.log"
 
 umask 002
 
+
+# SQL for rename
 read -r -d '' SQL <<-EOF
 	-- FINAL Rename command
 	select
@@ -47,6 +49,41 @@ read -r -d '' SQL <<-EOF
 	order by newfile
 	--limit 2
 EOF
+
+# SQL for collection linking
+read -r -d '' SQL <<-EOF
+	-- FINAL Rename command
+	select
+	  mp.file
+        from metadata_items as metai
+	inner join media_items as medi
+		on medi.metadata_item_id = metai.id 
+	inner join media_parts as mp
+		on mp.media_item_id = medi.id 
+	left join metadata_items as season_metai
+		on season_metai.id = metai.parent_id
+	left join metadata_items as series_metai
+		on series_metai.id = season_metai.parent_id
+	inner join taggings as taggings
+		on taggings.metadata_item_id = metai.id
+	inner join tags as tags
+		on tags.id = taggings.tag_id
+	WHERE metai.guid NOT LIKE 'iva%' 
+	AND mp.file != ""
+	and metai.metadata_type in (1,4)
+	and metai.library_section_id in (1,2)
+	and tags.tag in ('CSM3', 'CSM4', 'CSM4', 'CSM6', 'CSM7', 'CSM8')
+	--limit 2
+EOF
+
+
+function link_file {
+	SOURCE="${1}"
+	DEST="./$(basename ${SOURCE})"
+
+	echo "${SOURCE} -> ${DEST}"
+	ln -s "${SOURCE}" "${DEST}"
+}
 
 function copy_file {
 
@@ -98,7 +135,8 @@ IFS=$'\n'
 LINES=($(sqlite3 "${DB}" <<< "${SQL}"))
 (for line in "${LINES[@]}"
 do
-	copy_file "${line%%|*}" "${line##*|}"
-done) | pv -N TOTAL -l -c -i 20 -s ${#LINES[@]} >> "${LOGFILE}"
+	link_file "${line}"
+	#copy_file "${line%%|*}" "${line##*|}"
+done) | pv -N TOTAL -l -c -i 20 -s ${#LINES[@]} #>> "${LOGFILE}"
 
 [ -z "${DB_TMP}" ] || rm "${DB}"
