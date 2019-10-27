@@ -2,8 +2,13 @@
 
 VERBOSE=true
 
-debug() { [ -z "${VERBOSE}" ] || echo "[${BASH_SOURCE}] ${NOOP}$@"; }
+debug() { [ -z "${VERBOSE}" ] || echo "[${BASH_SOURCE}] ${NOOP} $@"; }
 exe() { CMD="${1}"; shift; debug "executing ${CMD} ${@@Q}"; [ -z "${NOOP}" ] && ${CMD} "$@" ; }
+
+declare -a duplicate
+declare -a duplicate_dest
+
+export VIMINIT='source ~/.vim/vimrc|set ts=8 nomod nolist nospell nonu|set colorcolumn= hlsearch incsearch smartcase|nnoremap i <nop>|nnoremap <end> G|nnoremap <home> gg|nnoremap <Space> <C-f>|noremap q :qa!<CR>'
 
 for file in *.mkv
 do
@@ -11,24 +16,38 @@ do
   if [ $? -ne 0 ]
   then
     echo "$file already exists at \"${FNAME[*]}\"" >&2
-    duplicate=true
+    duplicate+=("${file}")
+    duplicate_dest+=("${FNAME[*]}")
   fi
 done
-while [ ! -z "$duplicate" ]
+for i in "${!duplicate[@]}"
 do
-  read -n 1 -p "Do you wish to overwrite? [y/N]: " -r yesno
-  if [ "${yesno}" == "y" -o "${yesno}" == "Y" ]
-  then
-    unset duplicate
-  elif [ "${yesno}" == "n" -o "${yesno}" == "N" -o -z "${yesno}" ]
-  then
-    echo -e "\nAborting..." >&2
-    exit 1
-  fi
-  echo
+  unset handled
+  while [ -z "$handled" ]
+  do
+    handled=true
+    read -n 1 -p "Do you wish to overwrite ${duplicate_dest[i]}? [y/N/(i)nfo]: " -r yesno
+    if [ "${yesno,,}" == "y" ]
+    then
+      :;
+    elif [ "${yesno,,}" == "n" -o "${yesno,,}" == "q" -o -z "${yesno}" ]
+    then
+      echo -e "\nAborting..." >&2
+      exit 1
+    elif [ "${yesno}" == "i" ]
+    then
+      vim -d -MR --not-a-term <(mediainfo "${duplicate[i]}") <(mediainfo "${duplicate_dest[i]}")
+      echo -en "\033[2K\r"
+      unset handled
+    else
+      echo -en "\033[2K\r"
+      unset handled
+    fi
+  done
 done
 
-exe sudo chown shimavak:plex *.mkv
+
+#exe sudo chown shimavak:plex *.mkv
 
 exe chmod 0664 *.mkv
 
