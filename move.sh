@@ -137,6 +137,8 @@ else # mode != batch
   while [ -f "${1}" ]
   do
     file="${1}"
+    [ "${file##*.}"  == "complete" ] &&
+      file="${file%%.complete}.mkv"
     debug "Single Mode: Working with ${file}"
     BFNAME="`basename "${file}"`"
 
