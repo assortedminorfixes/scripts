@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Default mode, move batch, moves files into appropriate folder based on folder name (e.g. A-D, etc.) using globbing.
+# Default mode, move directory, moves files into appropriate folder based on folder name (e.g. A-D, etc.) using globbing.
 
 # Added mode to move a single file to the correct folder if passed a single file as input.
 
@@ -8,6 +8,7 @@ VERBOSE=true
 
 debug() { [ -z "${VERBOSE}" ] || echo "[${BASH_SOURCE}] ${NOOP} ${@}"; }
 exe() { CMD="${1}"; shift; debug "executing ${CMD} ${@@Q}"; [ -z "${NOOP}" ] && ${CMD} "${@}" ; }
+error() { echo -e "${@}" >&2 ; }
 
 DESTFOLDER=/datapool/Media/Movies
 
@@ -21,21 +22,31 @@ move_single_file()
 {
   file="${1}"
   FN="`basename "${file}"`"
+  FN="${FN^}" # Correct first letter to uppercase
   firstletter="${FN:0:1}"
-  debug "-move_single_file ${file} (FN=$FN, firstletter=$firstletter)"
-  exe chmod 0664 *.mkv
+  debug "-${FUNCNAME[0]} ${file} (FN=$FN, firstletter=$firstletter)"
+  exe chmod 0664 "${file}"
   for dir in "${DESTFOLDER}"/*
   do
     glob="`basename "${dir}"`"
-    debug "--globbing for dir \"$dir\", glob=$glob"
-    [[ "${firstletter}" == [${glob}] ]] && exe mv "${file}" "${dir}" && break
+    debug "--${FUNCNAME[0]}: globbing for dir \"$dir\", glob=$glob"
+    if [[ "${firstletter}" == [${glob}] ]] 
+    then
+      exe mv "${file}" "${dir}/${FN}"
+      return
+    fi
   done
+
+  # Only get here if we didn't move the file.
+  echo "-${FUNCNAME[0]} unable to find destination folder for \"${file}\", skipping..."
 }
 
-check_file()
+find_duplicate()
 {
+  # Looks for file in destination folder and returns true if one is found.
+  retval=-1
   file="${1}"
-  debug "-Checking ${file}"
+  debug "-${FUNCNAME[0]} Checking ${file}"
   if [ "${file}" == '*.mkv' ]
   then
     echo "There are no mkv files in the current directory.  Aborting."
@@ -44,28 +55,30 @@ check_file()
   FNAME=( $(find "${DESTFOLDER}" -type f -name "${file}" -print -exec false {} +) )
   if [ ${?} -ne 0 ]
   then
-    echo "${file} already exists at \"${FNAME[*]}\"" >&2
+    error "${file} already exists at \"${FNAME[*]}\""
     duplicate+=("${file}")
     duplicate_dest+=("${FNAME[*]}")
+    retval=0
   fi
-  debug "-Done Checking ${file}. (FNAME=$FNAME)"
+  debug "-${FUNCNAME[0]} Done Checking ${file}. (FNAME=$FNAME)"
+  return ${retval}
 }
 
 prompt_duplicate()
 {
-  i=${1}
-  debug "-Prompt Duplicate index $i (${duplicate[i]}, ${duplicate_dest[i]})"
+  i=${1:-0}
+  debug "-${FUNCNAME[0]}  index $i (${duplicate[i]}, ${duplicate_dest[i]})"
   unset handled
   while [ -z "${handled}" ]
   do
     handled=true
-    read -n 1 -p "Do you wish to overwrite ${duplicate_dest[i]}? [y/N/(i)nfo]: " -r yesno
+    read -n 1 -p "Do you wish to overwrite ${duplicate_dest[i]}? [y/N/(i)nfo/(a)bort]: " -r yesno
     if [ "${yesno,,}" == "y" ]
     then
       :;
     elif [ "${yesno,,}" == "n" -o "${yesno,,}" == "q" -o -z "${yesno}" ]
     then
-      echo -e "\nAborting..." >&2
+      error "\nAborting..."
       exit 1
     elif [ "${yesno}" == "i" ]
     then
@@ -82,7 +95,7 @@ prompt_duplicate()
 
 if [ -z "${1}" -o -d "${1}" ]
 then
-  mode="batch"
+  mode="directory"
   # Use set to set the positional parameter 1 ($1) to the current directory (.) if no dir was passed.
   #  This emulates the previous operation mode.
   [ -z "${1}" ] && set -- .
@@ -92,16 +105,16 @@ fi
 
 
 
-if [ "${mode}" == "batch" ];
+if [ "${mode}" == "directory" ];
 then
-  debug "Batch Mode"
+  debug "Directory Mode"
   while [ -d "${1}" ]
   do
     pushd "${1}"
     for file in *.mkv
     do
-      debug "Batch Mode: Checking ${file}"
-      check_file "${file}"
+      debug "Directory Mode: Checking ${file}"
+      find_duplicate "${file}"
     done
     for i in "${!duplicate[@]}"
     do
@@ -131,18 +144,37 @@ then
     [ -d "${1}" ] && popd
     shift || break
   done
-
-else # mode != batch
+else # mode != directory
   debug "Single Mode"
   while [ -f "${1}" ]
   do
     file="${1}"
-    [ "${file##*.}"  == "complete" ] &&
-      file="${file%%.complete}.mkv"
+
+    if [ "${file##*.}"  == "complete" ]
+    then
+      if [ -f "${file%.complete}.mkv" ]
+      then
+	file="${file%%.complete}.mkv"
+      else 
+	echo "${file%.complete}.mkv does not exist, exiting."
+       	exit 1
+      fi
+    fi
+
     debug "Single Mode: Working with ${file}"
     BFNAME="`basename "${file}"`"
 
-    check_file "${BFNAME}"
+    if find_duplicate "${BFNAME}"
+    then
+      # File already exists, abort in non-interactive mode, prompt in interactive mode.
+      if [ -t 0 ] # Interactive mode
+      then
+	prompt_duplicate
+      else
+	error "Duplicates found, running in batch mode, aborting."
+	exit 1
+      fi
+    fi
 
     move_single_file "${file}"
 
