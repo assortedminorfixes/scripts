@@ -20,11 +20,11 @@ export VIMINIT='source ~/.vim/vimrc|set ts=8 nomod nolist nospell nonu|set color
 
 move_single_file()
 {
-  file="${1}"
-  FN="`basename "${file}"`"
+  local file="${1}"
+  local FN="`basename "${file}"`"
   FN="${FN^}" # Correct first letter to uppercase
   firstletter="${FN:0:1}"
-  debug "-${FUNCNAME[0]} ${file} (FN=$FN, firstletter=$firstletter)"
+  debug "-${FUNCNAME[0]} \"${file}\" (FN=$FN, firstletter=$firstletter)"
   exe chmod 0664 "${file}"
   for dir in "${DESTFOLDER}"/*
   do
@@ -44,35 +44,38 @@ move_single_file()
 find_duplicate()
 {
   # Looks for file in destination folder and returns true if one is found.
-  retval=-1
-  file="${1}"
-  debug "-${FUNCNAME[0]} Checking ${file}"
-  if [ "${file}" == '*.mkv' ]
+  local retval=-1
+  local FNAME="${1}"
+  debug "-${FUNCNAME[0]} Checking ${FNAME}"
+  if [ "${FNAME}" == '*.mkv' ]
   then
     echo "There are no mkv files in the current directory.  Aborting."
     exit 1
   fi
-  FNAME=( $(find "${DESTFOLDER}" -type f -name "${file}" -print -exec false {} +) )
+  local file="$(basename "${FNAME}")"
+  DFNAME=( $(find "${DESTFOLDER}" -type f -name "${file}" -print -exec false {} +) )
   if [ ${?} -ne 0 ]
   then
-    error "${file} already exists at \"${FNAME[*]}\""
-    duplicate+=("${file}")
-    duplicate_dest+=("${FNAME[*]}")
+    error "${file} already exists at \"${DFNAME[@]}\""
+    duplicate+=("${FNAME}")
+    duplicate_dest+=("${DFNAME[*]}")
     retval=0
   fi
-  debug "-${FUNCNAME[0]} Done Checking ${file}. (FNAME=$FNAME)"
+  debug "-${FUNCNAME[0]} Done Checking ${file}. (DFNAME=$DFNAME)"
   return ${retval}
 }
 
 prompt_duplicate()
 {
-  i=${1:-0}
-  debug "-${FUNCNAME[0]}  index $i (${duplicate[i]}, ${duplicate_dest[i]})"
+  local i=${1:-0}
+  local ORIGIN_FILE="${duplicate[i]}"
+  local DEST_FILE="${duplicate_dest[i]}"
+  debug "-${FUNCNAME[0]}  index $i (${ORIGIN_FILE}, ${DEST_FILE}) in `pwd`"
   unset handled
   while [ -z "${handled}" ]
   do
     handled=true
-    read -n 1 -p "Do you wish to overwrite ${duplicate_dest[i]}? [y/N/(i)nfo/(a)bort]: " -r yesno
+    read -n 1 -p "Do you wish to overwrite ${DEST_FILE}? [y/N/(i)nfo/(q)uit]: " -r yesno
     if [ "${yesno,,}" == "y" ]
     then
       :;
@@ -82,7 +85,7 @@ prompt_duplicate()
       exit 1
     elif [ "${yesno}" == "i" ]
     then
-      vim -d -MR --not-a-term <(mediainfo "${duplicate[i]}") <(mediainfo "${duplicate_dest[i]}")
+      vim -d -MR --not-a-term <(mediainfo "${ORIGIN_FILE}") <(mediainfo "${DEST_FILE}")
       echo -en "\033[2K\r"
       unset handled
     else
@@ -164,7 +167,7 @@ else # mode != directory
     debug "Single Mode: Working with ${file}"
     BFNAME="`basename "${file}"`"
 
-    if find_duplicate "${BFNAME}"
+    if find_duplicate "${file}"
     then
       # File already exists, abort in non-interactive mode, prompt in interactive mode.
       if [ -t 0 ] # Interactive mode
