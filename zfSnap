@@ -11,13 +11,14 @@
 
 # Updated by Nicholas Sperling for some untested changes to how the snapshots work.
 
-readonly VERSION=1.12.0
+readonly VERSION=1.11.1
 
 ESED='sed -E'
 zfs_cmd='/sbin/zfs'
 zpool_cmd='/sbin/zpool'
 
 zauto='-o net.assortedminorfixes:is-auto-snapshot=true'
+zexpire_opt='net.assortedminorfixes:snapshot-expire'
 
 note() {
     echo "NOTE: $*" > /dev/stderr
@@ -313,15 +314,19 @@ fi
 readonly date_pattern='20[0-9][0-9]-[01][0-9]-[0-3][0-9]_[0-2][0-9]\.[0-5][0-9]\.[0-5][0-9]'
 if is_false $zero_seconds; then
     readonly tfrmt='%Y-%m-%d_%H.%M.%S'
+    readonly ntfrmt="%Y-%m-%d %H:%M:%S"
 else
     readonly tfrmt='%Y-%m-%d_%H.%M.00'
+    readonly ntfrmt="%Y-%m-%d %H:%M:00"
 fi
 
 readonly htime_pattern='([0-9]+y)?([0-9]+m)?([0-9]+w)?([0-9]+d)?([0-9]+h)?([0-9]+M)?([0-9]+[s]?)?'
 
 
 is_true $dry_run && zfs_list=`$zfs_cmd list -H -o name`
-ntime=`date "+$tfrmt"`
+stdtime=`date "+$ntfrmt"`
+ntime=`date -d"$stdtime" "+$tfrmt"`
+ntime_s=`date -d"$stdtime" "+%s"`
 while [ "$1" ]; do
     while [ "$1" = '-r' -o "$1" = '-R' -o "$1" = '-a' -o "$1" = '-p' -o "$1" = '-P' -o "$1" = '-D' -o "$1" = '-d' ]; do
         case "$1" in
@@ -367,7 +372,9 @@ while [ "$1" ]; do
     if is_false $delete_snapshots && [ $1 ]; then
         if skip_pool $1; then
             if [ $1 = `echo $1 | $ESED -e 's/^-//'` ]; then
-                zfs_snapshot="$zfs_cmd snapshot $zopt $zauto $1@${prefx}${ntime}--${ttl}${postfx}"
+		[ -z "${zexpire_opt}" ] && unset zexp || zexp="-o ${zexpire_opt}=$((${ntime_s} + `time2s ${ttl}`))"
+		echo "zexpopt: ${zexpire_opt}"
+                zfs_snapshot="$zfs_cmd snapshot $zopt $zauto $zexp $1@${prefx}${ntime}--${ttl}${postfx}"
                 if is_false $dry_run; then
                     if $zfs_snapshot > /dev/stderr; then
                         is_true $verbose && echo "$zfs_snapshot ... DONE"
