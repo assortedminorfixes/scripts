@@ -103,7 +103,7 @@ IFS=$'\n\t'
 
 
 # List of pools which should not have auto-snapshots.
-DS_NOAUTO=( $($ZFS list -H -o name,${DSAUTOPARAM} | awk -F $'\t' '$2 == "false" || $2 == "-" { print $1 }') )
+DS_NOAUTO=( $($ZFS list -H -o name,${DSAUTOPARAM} | awk -F $'\t' '$2 == "false" { print $1 }') )
 if [ ${#DS_NOAUTO[@]} -ne 0 ];
 then
   if [ ! -z "${ISAUTOPARAM}" ];
@@ -119,7 +119,7 @@ fi
 
 # EXPIRED_SNAPS
 # Search pools with auto-snapshot turned on.
-DS_AUTO=( $($ZFS list -H -o name,${DSAUTOPARAM} | awk -F $'\t' '$2 == "true" { print $1 }') )
+DS_AUTO=( $($ZFS list -H -o name,${DSAUTOPARAM} | awk -F $'\t' '$2 == "true" || $2 == "-" { print $1 }') )
 
 if [ ${#DS_AUTO[@]} -ne 0 ];
 then
