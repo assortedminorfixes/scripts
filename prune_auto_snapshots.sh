@@ -103,14 +103,17 @@ IFS=$'\n\t'
 
 
 # List of pools which should not have auto-snapshots.
-DS_NOAUTO=( $($ZFS list -H -o name,${DSAUTOPARAM} | awk -F $'\t' '$2 == "false" { print $1 }') )
-if [ ! -z "${ISAUTOPARAM}" ];
+DS_NOAUTO=( $($ZFS list -H -o name,${DSAUTOPARAM} | awk -F $'\t' '$2 == "false" || $2 == "-" { print $1 }') )
+if [ ${#DS_NOAUTO[@]} -ne 0 ];
 then
-  # We have a setting for a snapshot to say if it is auto, so use that to dertmine it.
-  AUTO_SNAPS_ON_NOAUTO=( $($ZFS list -H -o name,${ISAUTOPARAM} -t snap -r "${DS_NOAUTO[@]}" | awk -F $'\t' '$2 == "true" { print $1 }'  2>/dev/null) )
-else
-  # No setting, so assume that auto-snapshots follow the pattern.
-  AUTO_SNAPS_ON_NOAUTO=( $($ZFS list -H -o name -t snap -r "${DS_NOAUTO[@]}" | grep -E -e "^${PATTERN}$" 2>/dev/null) )
+  if [ ! -z "${ISAUTOPARAM}" ];
+  then
+    # We have a setting for a snapshot to say if it is auto, so use that to dertmine it.
+    AUTO_SNAPS_ON_NOAUTO=( $($ZFS list -H -o name,${ISAUTOPARAM} -t snap -r "${DS_NOAUTO[@]}" | awk -F $'\t' '$2 == "true" { print $1 }'  2>/dev/null) )
+  else
+    # No setting, so assume that auto-snapshots follow the pattern.
+    AUTO_SNAPS_ON_NOAUTO=( $($ZFS list -H -o name -t snap -r "${DS_NOAUTO[@]}" | grep -E -e "^${PATTERN}$" 2>/dev/null) )
+  fi
 fi
 
 
@@ -118,26 +121,29 @@ fi
 # Search pools with auto-snapshot turned on.
 DS_AUTO=( $($ZFS list -H -o name,${DSAUTOPARAM} | awk -F $'\t' '$2 == "true" { print $1 }') )
 
-if [ ! -z "${ISAUTOPARAM}" ];
+if [ ${#DS_AUTO[@]} -ne 0 ];
 then
-  # We have a setting for a snapshot to say if it is auto, so use that to dertmine it.
-  AUTO_SNAPS_ON_AUTO="$($ZFS list -H -o name,${ISAUTOPARAM},${EXPIRESPARAM} -t snap -r "${DS_AUTO[@]}" | awk 'BEGIN { FS="\t"; OFS=","; }; $2 == "true" { print $1,$3 }'  2>/dev/null)"
-
-  # First filter for expires param, if all of the results have it, then we can use awk, otherwise we will have to parse the names.
-  echo "${AUTO_SNAPS_ON_AUTO}" | grep -E -e ",-$" 2>/dev/null >/dev/null
-  if [ $? -ne 0 ]
+  if [ ! -z "${ISAUTOPARAM}" ];
   then
-    # All snaps have expiration epochs.
-    debug "No bad expirations..."
-    EXPIRED_SNAPS=( $(echo "${AUTO_SNAPS_ON_AUTO}" | awk 'BEGIN { FS=","; now=systime() }; $2 <= now { print $1 }' ) )
-    unset AUTO_SNAPS_ON_AUTO
+    # We have a setting for a snapshot to say if it is auto, so use that to dertmine it.
+    AUTO_SNAPS_ON_AUTO="$($ZFS list -H -o name,${ISAUTOPARAM},${EXPIRESPARAM} -t snap -r "${DS_AUTO[@]}" | awk 'BEGIN { FS="\t"; OFS=","; }; $2 == "true" { print $1,$3 }'  2>/dev/null)"
+
+    # First filter for expires param, if all of the results have it, then we can use awk, otherwise we will have to parse the names.
+    echo "${AUTO_SNAPS_ON_AUTO}" | grep -E -e ",-$" 2>/dev/null >/dev/null
+    if [ $? -ne 0 ]
+    then
+      # All snaps have expiration epochs.
+      debug "No bad expirations..."
+      EXPIRED_SNAPS=( $(echo "${AUTO_SNAPS_ON_AUTO}" | awk 'BEGIN { FS=","; now=systime() }; $2 <= now { print $1 }' ) )
+      unset AUTO_SNAPS_ON_AUTO
+    else
+      debug "Some bad expirations, just use file name."
+      AUTO_SNAPS_ON_AUTO=( $(echo "${AUTO_SNAPS_ON_AUTO}" | awk 'BEGIN { FS=","; }; { print $1 }' ) )
+    fi
   else
-    debug "Some bad expirations, just use file name."
-    AUTO_SNAPS_ON_AUTO=( $(echo "${AUTO_SNAPS_ON_AUTO}" | awk 'BEGIN { FS=","; }; { print $1 }' ) )
+    # No setting, so assume that auto-snapshots follow the pattern.
+    AUTO_SNAPS_ON_AUTO=( $($ZFS list -H -o name -t snap -r "${DS_AUTO[@]}" | grep -E -e "^${PATTERN}$" 2>/dev/null) )
   fi
-else
-  # No setting, so assume that auto-snapshots follow the pattern.
-  AUTO_SNAPS_ON_AUTO=( $($ZFS list -H -o name -t snap -r "${DS_AUTO[@]}" | grep -E -e "^${PATTERN}$" 2>/dev/null) )
 fi
 
 if [ ${#AUTO_SNAPS_ON_AUTO[*]} -ne 0 ];
