@@ -33,6 +33,7 @@ function usage
   echo "  -E/e: [Don't] Remove empty snapshots.  Default: Don't remove empty snapshots."
   echo "  -o parameter-name: name of parameter to check for auto-snapshot disable. (default: ${DSAUTOPARAM})"
   echo "  -p parameter-name: name of parameter to check each snapshot to determine if it was automatic. (default: ${DEFISAUTOPARAM:-not used})"
+  echo "  -x parameter-name: name of parameter to check for snapshot expiration. (default: ${DEFEXPIRESPARAM})"
   echo "  Destroys snapshots on pools that have the auto-snapshot parameter set to false."
   echo "  By default, only destoys snapshots matching the zfSnap pat for snapshots (override with -a)"
   echo "  (set pools/zfs to be considered for elimination by 'zfs set -o ${DSAUTOPARAM}=true <DATASET>'"
@@ -41,7 +42,7 @@ function usage
 
 VERBOSE=yes
 
-OPTSPEC=":ho:nvqap"
+OPTSPEC=":ho:nvqap:x:Ee"
 
 while getopts "${OPTSPEC}" option
 do
@@ -65,7 +66,7 @@ do
     q )
       VERBOSE=
       ;;
-    e)
+    x)
       EXPIRESPARAM=${OPTARG}
       ;;
     p)
