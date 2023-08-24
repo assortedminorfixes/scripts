@@ -1,9 +1,10 @@
 #!/bin/bash
 
 
-VERBOSE=v
+VERBOSE=
 
 debug() { [ -z "${VERBOSE}" ] || echo "[${BASH_SOURCE}] ${NOOP}$@"; }
+exe() { CMD="${1}"; shift; debug "executing ${CMD} ${@@Q}"; [ -z "${NOOP}" ] && ${CMD} "${@}" ; }
 
 ZFS=/sbin/zfs
 
@@ -96,7 +97,7 @@ do
       DSAUTOPARAM=${OPTARG}
       ;;
     n )
-      NOOP="NOOP: "
+      NOOP="n"
       ;;
     v )
       VERBOSE="v"
@@ -142,128 +143,31 @@ done
 
 PATTERN="${PATTERN:-$auto_snap_pat}"
 
-OIFS="${IFS}"
-IFS=$'\n\t'
+# EXPIRED_SNAPS
+# Search pools with auto-snapshot turned on.
+DS_AUTO=( $($ZFS list -H -o name,${DSAUTOPARAM} | awk -F $'\t' '$2 == "true" || $2 == "-" { print $1 }') )
 
-[ -z "$NOOP" ] || ZFSOPTS="n"
-[ -z "$VERBOSE" ] || ZFSOPTS="${ZFSOPTS}v"
-[ -z "$ZFSOPTS" ] || ZFSOPTS="-${ZFSOPTS}"
-
-if [ ! "${REMOVE_EMPTY}" = "ONLY" ]
+if [ ${#DS_AUTO[@]} -ne 0 ];
 then
-
-  # List of pools which should not have auto-snapshots.
-  DS_NOAUTO=( $($ZFS list -H -o name,${DSAUTOPARAM} | awk -F $'\t' '$2 == "false" { print $1 }') )
-  if [ ${#DS_NOAUTO[@]} -ne 0 ];
-  then
-    if [ ! -z "${ISAUTOPARAM}" ];
-    then
-      # We have a setting for a snapshot to say if it is auto, so use that to dertmine it.
-      AUTO_SNAPS_ON_NOAUTO=( $($ZFS list -H -o name,${ISAUTOPARAM} -t snap -r "${DS_NOAUTO[@]}" | awk -F $'\t' '$2 == "true" { print $1 }'  2>/dev/null) )
-    else
-      # No setting, so assume that auto-snapshots follow the pattern.
-      AUTO_SNAPS_ON_NOAUTO=( $($ZFS list -H -o name -t snap -r "${DS_NOAUTO[@]}" | grep -E -e "^${PATTERN}$" 2>/dev/null) )
-    fi
-  fi
-
-
-  # EXPIRED_SNAPS
-  # Search pools with auto-snapshot turned on.
-  DS_AUTO=( $($ZFS list -H -o name,${DSAUTOPARAM} | awk -F $'\t' '$2 == "true" || $2 == "-" { print $1 }') )
-
-  if [ ${#DS_AUTO[@]} -ne 0 ];
-  then
-    if [ ! -z "${ISAUTOPARAM}" ];
-    then
-      # We have a setting for a snapshot to say if it is auto, so use that to dertmine it.
-      AUTO_SNAPS_ON_AUTO="$($ZFS list -H -o name,${ISAUTOPARAM},${EXPIRESPARAM} -t snap -r "${DS_AUTO[@]}" | awk 'BEGIN { FS="\t"; OFS=","; }; $2 == "true" { print $1,$3 }'  2>/dev/null)"
-
-      # First filter for expires param, if all of the results have it, then we can use awk, otherwise we will have to parse the names.
-      echo "${AUTO_SNAPS_ON_AUTO}" | grep -E -e ",-$" 2>/dev/null >/dev/null
-      if [ $? -ne 0 ]
-      then
-	# All snaps have expiration epochs.
-	debug "No bad expirations..."
-	EXPIRED_SNAPS=( $(echo "${AUTO_SNAPS_ON_AUTO}" | awk 'BEGIN { FS=","; now=systime() }; $2 <= now { print $1 }' ) )
-	unset AUTO_SNAPS_ON_AUTO
-      else
-	debug "Some bad expirations, just use file name."
-	AUTO_SNAPS_ON_AUTO=( $(echo "${AUTO_SNAPS_ON_AUTO}" | awk 'BEGIN { FS=","; }; { print $1 }' ) )
-      fi
-    else
-      # No setting, so assume that auto-snapshots follow the pattern.
-      debug "Finding snapshots based on pattern."
-      AUTO_SNAPS_ON_AUTO=( $($ZFS list -H -o name -t snap -r "${DS_AUTO[@]}" | grep -E -e "^${PATTERN}$" 2>/dev/null) )
-    fi
-  fi
-
-  if [ ${#AUTO_SNAPS_ON_AUTO[*]} -ne 0 ];
-  then
-
-    EXPIRED_SNAPS=( $(echo "${AUTO_SNAPS_ON_AUTO[*]}" | awk "$(AWK_FN)") )
-
-  fi
-
-
-
-  BAD_SNAPS=( "${AUTO_SNAPS_ON_NOAUTO[@]}" "${EXPIRED_SNAPS[@]}" )
-
-
-  if [ ${#BAD_SNAPS[*]} -eq 0 ];
-  then
-    debug "No auto snaps to remove."
-  else
-    nerrs=0
-    ERRS=
-    debug "Destroying ${#BAD_SNAPS[@]} snapshots: ${BAD_SNAPS[*]}"
-    for SNAP in ${BAD_SNAPS}
-    do
-      if [ "${SNAP}" = "${SNAP//@/}" ]
-      then
-	ERRS=( "${ERRS[*]}" "$SNAP" )
-	(( nerrs++ ))
-      fi
-    done
-
-    if [ $nerrs -ne 0  ]
-    then
-      echo "ERROR: Snapshot(s) [${ERRS[@]} does not appear to be a snapshot (no @ in name), aborting!  No snaps have been destroyed." >&2
-      exit $nerrs
-    fi
-
-
-    BAD_SNAPS=( "$(simplify_snapshot_list BAD_SNAPS )" )
-    for SNAP in ${BAD_SNAPS[@]}
-    do
-      echo "Destroying snap \"${SNAP}\"."
-      $ZFS destroy $ZFSOPTS "${SNAP}" 
-      if [ $? -ne 0 ];
-      then
-	echo "Problem with Snap \"${SNAP}\"."
-	break
-      fi
-    done
-
-  fi
-
+  # We have a setting for a snapshot to say if it is auto, so use that to dertmine it.
+  AUTO_SNAPS_ON_AUTO_MISSING_EXP=( "$($ZFS list -H -o name,${ISAUTOPARAM},${EXPIRESPARAM} -t snap -r "${DS_AUTO[@]}" | awk "$(AWK_FN)"  2>/dev/null)" )
 
 fi
 
-if [ ! -z ${REMOVE_EMPTY} ];
+if [ ${#AUTO_SNAPS_ON_AUTO_MISSING_EXP[*]} -ne 0 ];
 then
-  EMPTY_SNAPS=( $($ZFS list -H -o name,used -t snap | awk -F $'\t' '$2 == "0B" { print $1 }' ) )
-fi
-
-if [ ${#EMPTY_SNAPS[*]} -eq 0 ];
-then
-  debug "No empty snaps to remove."
-else
-  EMPTY_SNAPS=( "$(simplify_snapshot_list EMPTY_SNAPS)" )
-
-  for SNAP in ${EMPTY_SNAPS[@]}
+  parallel --halt now,fail=1 --bar -j 1 -C ',' $ZFS set {2} {3} {1} ::: ${AUTO_SNAPS_ON_AUTO_MISSING_EXP[@]}
+  exit 0
+  for snap in ${AUTO_SNAPS_ON_AUTO_MISSING_EXP[@]}
   do
-    $ZFS destroy $ZFSOPTS "${SNAP}" || exit
+    exe $ZFS set ${snap//,/ }
+    if [ $? -ne 0 ]
+    then
+      echo "Aborting remaining changes."
+      exit 1
+    fi
   done
 fi
 
-IFS="${OIFS}"
+exit 0
+
